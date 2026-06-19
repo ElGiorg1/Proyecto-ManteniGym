@@ -1,5 +1,6 @@
 import React, { useEffect, useState, useRef } from 'react';
 import { supabase } from './supabaseClient';
+import Login from './Login';
 
 const currentUserRole = 'admin'; 
 const currentUserId = 1;
@@ -11,7 +12,20 @@ const MAP_HEIGHT = 800;
 const MACHINE_W = 120;
 const MACHINE_H = 80;
 
-export default function GymApp() {
+export default function Main() {
+  const [session, setSession] = useState(null);
+
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      setSession(session);
+    });
+  }, []);
+
+  if (!session) return <Login setSession={setSession} />;
+  return <GymApp session={session} />;
+}
+
+export function GymApp() {
   const [machines, setMachines] = useState([]);
   const [selectedMachine, setSelectedMachine] = useState(null);
   const [note, setNote] = useState("");
