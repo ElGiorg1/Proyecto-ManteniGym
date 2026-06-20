@@ -8,19 +8,13 @@ export default function Login({ setSession }) {
   const [loading, setLoading] = useState(false);
   const [isRegisterMode, setIsRegisterMode] = useState(false);
   
-  // Estados para controlar el "fade-in" visual y suave
-  const [showRegisterFields, setShowRegisterFields] = useState(false);
+  // Nuevo: Estado para sugerir registro si el correo no existe
+  const [suggestRegister, setSuggestRegister] = useState(false);
 
-  // Sincronizar el modo de registro con la animación suave
+  // Limpiar sugerencias si el usuario cambia de modo o modifica el email
   useEffect(() => {
-    if (isRegisterMode) {
-      // Un micro-retraso para que el navegador procese el render antes de animar
-      const timer = setTimeout(() => setShowRegisterFields(true), 50);
-      return () => clearTimeout(timer);
-    } else {
-      setShowRegisterFields(false);
-    }
-  }, [isRegisterMode]);
+    setSuggestRegister(false);
+  }, [isRegisterMode, email]);
 
   // --- VALIDACIONES DE SEGURIDAD ---
   const hasUppercase = /[A-Z]/.test(password);
@@ -45,6 +39,8 @@ export default function Login({ setSession }) {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    setSuggestRegister(false);
+    
     if (isRegisterMode) {
       if (strengthPoints < 4) return alert("La contraseña no cumple con los requisitos.");
       if (password !== confirmPassword) return alert("Las contraseñas no coinciden.");
@@ -56,8 +52,27 @@ export default function Login({ setSession }) {
     } else {
       setLoading(true);
       const { data, error } = await supabase.auth.signInWithPassword({ email, password });
-      if (error) alert("Error: " + error.message);
-      else setSession(data.session);
+      
+      if (error) {
+        // Si las credenciales están mal, verificamos si el usuario existe en el sistema
+        if (error.message.includes("Invalid login credentials")) {
+          // Intentamos hacer un registro "fantasma" muy rápido sólo para leer la respuesta de Supabase.
+          // Si Supabase dice que el usuario ya existe, el problema es sólo la contraseña.
+          // Si no dice que existe, significa que es un correo totalmente nuevo.
+          const { error: signUpCheck } = await supabase.auth.signUp({ email, password: 'TemporaryCheck123!' });
+          
+          if (signUpCheck && signUpCheck.message.includes("User already registered")) {
+            alert("Contraseña incorrecta. Inténtalo de nuevo.");
+          } else {
+            // El usuario no existe en la base de datos
+            setSuggestRegister(true);
+          }
+        } else {
+          alert("Error al entrar: " + error.message);
+        }
+      } else {
+        setSession(data.session);
+      }
     }
     setLoading(false);
   };
@@ -65,26 +80,43 @@ export default function Login({ setSession }) {
   return (
     <div className="min-h-screen flex items-center justify-center bg-slate-950 p-4 font-sans text-slate-100 selection:bg-blue-500/30">
       
-      {/* Contenedor con transición de altura fluida (duration-500) */}
       <form 
         onSubmit={handleSubmit} 
         className="bg-slate-900/90 backdrop-blur-md p-8 rounded-3xl shadow-2xl w-full max-w-sm border border-slate-800/80 transition-all duration-500 ease-in-out transform hover:scale-[1.005]"
       >
         
-        {/* Título animado con desvanecimiento controlado */}
         <div className="text-center mb-6">
           <h2 className="text-2xl font-black text-slate-100 uppercase tracking-tight transition-all duration-300">
-            {isRegisterMode ? 'Crear Cuenta' : 'Iniciar Sesión'}
+            {isRegisterMode ? 'Crear Cuenta' : 'Acceso Staff'}
           </h2>
           <p className="text-slate-400 text-xs mt-1 transition-all duration-300">
             {isRegisterMode ? 'Registra tu correo para administrar tu gimnasio' : 'Ingresa tus credenciales para continuar'}
           </p>
         </div>
 
-        {/* Campos del Formulario */}
+        {/* ALERTA INTELIGENTE: SUGERENCIA DE REGISTRO */}
+        <div className={`transition-all duration-500 ease-in-out overflow-hidden ${
+          suggestRegister 
+            ? 'max-h-24 opacity-100 mb-4 transform translate-y-0' 
+            : 'max-h-0 opacity-0 pointer-events-none'
+        }`}>
+          <div className="p-3 bg-blue-950/40 border border-blue-800/60 rounded-xl text-center">
+            <p className="text-[11px] text-blue-300 mb-2">Este correo no está registrado en el sistema.</p>
+            <button
+              type="button"
+              onClick={() => {
+                setIsRegisterMode(true);
+                setSuggestRegister(false);
+              }}
+              className="text-xs bg-blue-600 hover:bg-blue-500 text-white font-bold py-1 px-3 rounded-lg transition"
+            >
+              Registrar este correo ahora
+            </button>
+          </div>
+        </div>
+
         {/* Campos del Formulario */}
         <div className="mb-2">
-          {/* Input Email */}
           <input 
             className="w-full p-3 bg-slate-950/80 border border-slate-800 rounded-xl outline-none text-slate-100 text-sm placeholder-slate-600 transition-all duration-300 focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10" 
             type="email" 
@@ -94,7 +126,6 @@ export default function Login({ setSession }) {
             onChange={(e) => setEmail(e.target.value)} 
           />
           
-          {/* Input Password (Le ponemos un mt-4 para separarlo del email) */}
           <input 
             className="w-full p-3 mt-4 bg-slate-950/80 border border-slate-800 rounded-xl outline-none text-slate-100 text-sm placeholder-slate-600 transition-all duration-300 focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10" 
             type="password" 
@@ -104,7 +135,7 @@ export default function Login({ setSession }) {
             onChange={(e) => setPassword(e.target.value)} 
           />
 
-          {/* INDICADORES DE FUERZA (Maneja sus márgenes dinámicamente) */}
+          {/* INDICADORES DE FUERZA */}
           <div className={`transition-all duration-500 ease-in-out overflow-hidden ${
             isRegisterMode && password.length > 0 
               ? 'max-h-40 opacity-100 mt-3 mb-1' 
@@ -125,7 +156,7 @@ export default function Login({ setSession }) {
             </div>
           </div>
 
-          {/* RECUADRO DE CONFIRMACIÓN (Le añadimos mt-4 dinámico solo cuando abre) */}
+          {/* RECUADRO DE CONFIRMACIÓN */}
           <div className={`transition-all duration-500 ease-in-out overflow-hidden ${
             isRegisterMode 
               ? 'max-h-14 opacity-100 mt-4' 
@@ -146,16 +177,14 @@ export default function Login({ setSession }) {
           </div>
         </div>
 
-        {/* Botón interactivo */}
         <button 
           disabled={loading || (isRegisterMode && (strengthPoints < 4 || password !== confirmPassword))} 
           type="submit"
-          className="w-full py-3 mt-2 bg-blue-600 text-white font-bold rounded-xl shadow-lg transition-all duration-300 hover:bg-blue-500 active:scale-[0.98] disabled:opacity-30 disabled:hover:bg-blue-600 disabled:active:scale-100"
+          className="w-full py-3 mt-4 bg-blue-600 text-white font-bold rounded-xl shadow-lg transition-all duration-300 hover:bg-blue-500 active:scale-[0.98] disabled:opacity-30 disabled:hover:bg-blue-600 disabled:active:scale-100"
         >
           {loading ? 'Procesando...' : (isRegisterMode ? 'Registrarme y Entrar' : 'Iniciar Sesión')}
         </button>
 
-        {/* Enlace para alternar modos */}
         <div className="mt-6 text-center">
           <button
             type="button"
