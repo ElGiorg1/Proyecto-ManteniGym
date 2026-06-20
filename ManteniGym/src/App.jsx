@@ -20,6 +20,16 @@ export default function App() {
   const [gym, setGym] = useState(null);
   const [loadingGym, setLoadingGym] = useState(true);
 
+  // Estados para el Formulario de Configuración Inicial Dinámico
+  const [step, setStep] = useState(1); // 1 = Login/Verificación, 2 = Configuración inicial del Gym
+  const [gymName, setGymName] = useState('');
+  const [adminName, setAdminName] = useState('');
+  const [workersCount, setWorkersCount] = useState('');
+  const [loadingSetup, setLoadingSetup] = useState(false);
+
+  // --- NUEVO: Estado local para forzar las animaciones de Tailwind nativas ---
+  const [animateCard, setAnimateCard] = useState(false);
+
   useEffect(() => {
     // Verificar sesión inicial
     supabase.auth.getSession().then(({ data: { session } }) => {
@@ -31,15 +41,24 @@ export default function App() {
     // Escuchar cambios de sesión
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
       setSession(session);
-      if (session) checkGymOwnership(session.user.id);
-      else {
+      if (session) {
+        checkGymOwnership(session.user.id);
+      } else {
         setGym(null);
+        setStep(1); // Resetear al paso 1 si sale
         setLoadingGym(false);
       }
     });
 
     return () => subscription.unsubscribe();
   }, []);
+
+  // Controlar el disparo de la animación nativa cada vez que cambia el paso (step)
+  useEffect(() => {
+    setAnimateCard(false);
+    const timer = setTimeout(() => setAnimateCard(true), 50);
+    return () => clearTimeout(timer);
+  }, [step]);
 
   async function checkGymOwnership(userId) {
     try {
@@ -51,10 +70,13 @@ export default function App() {
       if (error) {
         console.error("Error de Supabase:", error);
         setGym(null);
+        setStep(1);
       } else if (data && data.length > 0) {
-        setGym(data[0]); // Tomamos el primer gimnasio encontrado
+        setGym(data[0]); 
       } else {
         setGym(null);
+        // Si tiene sesión iniciada pero no tiene Gym, pasamos suavemente al paso 2
+        setStep(2);
       }
     } catch (err) {
       console.error(err);
@@ -63,42 +85,153 @@ export default function App() {
     }
   }
 
-  if (loadingGym) return <div className="flex h-screen items-center justify-center font-bold text-xl">Cargando sistema...</div>;
-  if (!session) return <Login setSession={setSession} />;
-  if (!gym) return <GymSetup setGym={setGym} userId={session.user.id} />;
+  const handleCreateGym = async (e) => {
+    e.preventDefault();
+    if (!gymName || !adminName || !workersCount || !session) return;
 
-  // Si tiene sesión y tiene un gimnasio, cargamos el mapa real pasando el objeto 'gym'
-  return <GymMapActual gym={gym} />;
-}
-
-// ==========================================
-// 2. PANTALLA INTERMEDIA: CREACIÓN DE GYM
-// ==========================================
-function GymSetup({ setGym, userId }) {
-  const createGym = async () => {
-    const nombre = prompt("¿Cómo se llamará tu gimnasio?");
-    if (!nombre) return;
+    setLoadingSetup(true);
     
     const { data, error } = await supabase
       .from('gimnasios')
-      .insert([{ nombre, admin_id: userId }])
+      .insert([
+        { 
+          nombre: gymName, 
+          admin_id: session.user.id,
+          nombre_admin: adminName, 
+          cantidad_trabajadores: parseInt(workersCount) 
+        }
+      ])
       .select()
       .single();
 
-    if (error) alert("Error al crear: " + error.message);
-    else setGym(data);
+    setLoadingSetup(false);
+
+    if (error) {
+      alert("Error al registrar: " + error.message);
+    } else {
+      alert("¡Establecimiento registrado con éxito! Generando tu mapa...");
+      setGym(data); 
+    }
   };
 
+  // 1. Estado de carga inicial general del sistema
+  if (loadingGym) return <div className="flex h-screen items-center justify-center bg-slate-950 font-bold text-xl text-slate-100">Cargando sistema...</div>;
+  
+  // 2. Si ya pasó la configuración y tenemos un Gym cargado, mostramos el mapa real
+  if (session && gym) return <GymMapActual gym={gym} />;
+
+  // 3. FLUJO INTERACTIVO ADAPTABLE CON ANIMACIONES NATIVAS
   return (
-    <div className="flex flex-col items-center justify-center h-screen bg-gray-50 p-6 text-center">
-      <h1 className="text-4xl font-black mb-4 text-gray-800">Bienvenido a ManteniGym</h1>
-      <p className="text-gray-600 mb-8 max-w-sm">Para comenzar a ordenar tus equipos, necesitas registrar tu gimnasio en el sistema.</p>
-      <button 
-        onClick={createGym} 
-        className="px-8 py-4 bg-blue-600 text-white font-bold rounded-2xl shadow-lg hover:bg-blue-700 transition-all"
-      >
-        + Crear mi primer Gimnasio
-      </button>
+    <div className="min-h-screen flex items-center justify-center bg-slate-950 p-4 font-sans text-slate-100 overflow-hidden relative">
+      
+      {/* PANTALLA 1: LOGIN (Animada nativamente con opacidad y escala transicional) */}
+      {step === 1 && (
+        <div 
+          className={`w-full max-w-sm bg-slate-900/90 backdrop-blur-md p-8 rounded-3xl shadow-2xl border border-slate-800/80 transition-all duration-500 ease-out transform ${
+            animateCard 
+              ? 'opacity-100 scale-100 translate-y-0' 
+              : 'opacity-0 scale-95 translate-y-4'
+          }`}
+        >
+          <Login setSession={setSession} />
+        </div>
+      )}
+
+      {/* PANTALLA 2: CONFIGURACIÓN INICIAL (Animada nativamente) */}
+      {step === 2 && (
+        <div 
+          className={`w-full max-w-md bg-slate-900/90 backdrop-blur-md p-8 rounded-3xl shadow-2xl border border-slate-800/80 transition-all duration-500 ease-out transform ${
+            animateCard 
+              ? 'opacity-100 scale-100 translate-y-0' 
+              : 'opacity-0 scale-95 translate-y-4'
+          }`}
+        >
+          <form onSubmit={handleCreateGym}>
+            <div className="text-center mb-6">
+              <div className="w-14 h-14 bg-blue-600/10 text-blue-500 rounded-2xl flex items-center justify-center text-2xl mx-auto mb-3 border border-blue-500/20">
+                🏢
+              </div>
+              <h1 className="text-xl font-black text-slate-100 uppercase tracking-tight">
+                Configuración Inicial
+              </h1>
+              <p className="text-slate-400 text-[11px] mt-1">
+                Completa los datos de tu establecimiento para activar tu panel de control
+              </p>
+            </div>
+
+            <div className="space-y-4 mb-6">
+              <div>
+                <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1 px-1">
+                  Nombre del Establecimiento
+                </label>
+                <input 
+                  className="w-full p-3 bg-slate-950/80 border border-slate-800 rounded-xl outline-none text-slate-100 text-sm placeholder-slate-600 transition-all focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10" 
+                  type="text" 
+                  placeholder="Ej. Muscle Factory Gym" 
+                  required={step === 2}
+                  value={gymName}
+                  onChange={(e) => setGymName(e.target.value)} 
+                />
+              </div>
+
+              <div>
+                <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1 px-1">
+                  Nombre del Administrador / Dueño
+                </label>
+                <input 
+                  className="w-full p-3 bg-slate-950/80 border border-slate-800 rounded-xl outline-none text-slate-100 text-sm placeholder-slate-600 transition-all focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10" 
+                  type="text" 
+                  placeholder="Ej. Carlos Mendoza" 
+                  required={step === 2}
+                  value={adminName}
+                  onChange={(e) => setAdminName(e.target.value)} 
+                />
+              </div>
+
+              <div>
+                <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1 px-1">
+                  Cantidad de Trabajadores (Staff)
+                </label>
+                <input 
+                  className="w-full p-3 bg-slate-950/80 border border-slate-800 rounded-xl outline-none text-slate-100 text-sm placeholder-slate-600 transition-all focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10" 
+                  type="number" 
+                  min="0"
+                  placeholder="Ej. 5" 
+                  required={step === 2}
+                  value={workersCount}
+                  onChange={(e) => setWorkersCount(e.target.value)} 
+                />
+              </div>
+            </div>
+
+            <button 
+              disabled={loadingSetup}
+              type="submit"
+              className="w-full py-3 bg-blue-600 hover:bg-blue-500 text-white font-bold rounded-xl shadow-lg transition-all duration-300 active:scale-[0.98] disabled:opacity-40 text-sm"
+            >
+              {loadingSetup ? 'Guardando datos...' : '🚀 Inicializar mi Gimnasio'}
+            </button>
+
+            <div className="mt-4 text-center">
+              <button
+                type="button"
+                onClick={async () => {
+                  setLoadingGym(true);
+                  const { error } = await supabase.auth.signOut();
+                  if (error) {
+                    alert(error.message);
+                    setLoadingGym(false);
+                  }
+                }}
+                className="text-xs font-semibold text-slate-500 hover:text-slate-400 hover:underline transition-colors duration-200"
+              >
+                🚪 Cancelar y Cerrar Sesión
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
+
     </div>
   );
 }
@@ -224,7 +357,7 @@ function GymMapActual({ gym }) {
     return 'fill-green-400 stroke-green-600';
   };
 
-  if (loading) return <div className="flex h-screen items-center justify-center font-bold text-xl">Cargando mapa...</div>;
+  if (loading) return <div className="flex h-screen items-center justify-center font-bold text-xl bg-slate-950 text-slate-100">Cargando mapa...</div>;
 
   return (
     <div className="relative min-h-screen bg-gray-100 p-4 md:p-10 font-sans text-gray-900">
@@ -256,33 +389,30 @@ function GymMapActual({ gym }) {
         
         {/* MAPA */}
         <div className="lg:col-span-3 bg-white rounded-3xl shadow-xl p-6 border border-gray-200">
-          <div className="mb-6 flex justify-between items-center">
+          <div className="mb-6 flex justify-between items-start md:items-center flex-col md:flex-row gap-4">
             <div>
               <div className="flex items-center gap-3">
                 <h1 className="text-2xl font-black text-gray-800 uppercase tracking-tight">Mapa de {gym.nombre}</h1>
-                
-                {/* NUEVO BOTÓN DE CERRAR SESIÓN */}
                 <button 
                   onClick={async () => {
-                    const { error } = await supabase.auth.signOut();
-                    if (error) alert(error.message);
+                    await supabase.auth.signOut();
                   }}
                   className="px-2 py-1 text-xs bg-red-50 text-red-600 rounded-lg font-bold hover:bg-red-100 transition"
                 >
                   🚪 Salir
                 </button>
               </div>
-              <p className="text-gray-500 text-sm">
+              <p className="text-gray-500 text-sm mt-1">
                 {isEditMode ? "Modo de edición activado. Arrastra las máquinas." : "Toca una máquina para reportar."}
               </p>
             </div>
             
             {currentUserRole === 'admin' && (
-              <div className="flex gap-2">
-                <button onClick={() => setShowAddModal(true)} className="px-4 py-2 bg-green-500 text-white rounded-xl font-bold text-sm">
+              <div className="flex gap-2 self-end md:self-auto">
+                <button onClick={() => setShowAddModal(true)} className="px-4 py-2 bg-green-500 text-white rounded-xl font-bold text-sm shadow-md hover:bg-green-600">
                   + Nueva
                 </button>
-                <button onClick={() => setIsEditMode(!isEditMode)} className={`px-4 py-2 rounded-xl font-bold text-sm ${isEditMode ? 'bg-blue-600 text-white' : 'bg-gray-200 text-gray-800'}`}>
+                <button onClick={() => setIsEditMode(!isEditMode)} className={`px-4 py-2 rounded-xl font-bold text-sm shadow-md transition-all ${isEditMode ? 'bg-blue-600 text-white' : 'bg-gray-200 text-gray-800'}`}>
                   {isEditMode ? '💾 Guardar' : '✏️ Editar Mapa'}
                 </button>
               </div>

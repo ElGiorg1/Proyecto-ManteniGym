@@ -7,11 +7,9 @@ export default function Login({ setSession }) {
   const [confirmPassword, setConfirmPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [isRegisterMode, setIsRegisterMode] = useState(false);
-  
-  // Nuevo: Estado para sugerir registro si el correo no existe
   const [suggestRegister, setSuggestRegister] = useState(false);
 
-  // Limpiar sugerencias si el usuario cambia de modo o modifica el email
+  // Limpiar sugerencias si cambias de modo o modificas el email
   useEffect(() => {
     setSuggestRegister(false);
   }, [isRegisterMode, email]);
@@ -54,17 +52,11 @@ export default function Login({ setSession }) {
       const { data, error } = await supabase.auth.signInWithPassword({ email, password });
       
       if (error) {
-        // Si las credenciales están mal, verificamos si el usuario existe en el sistema
         if (error.message.includes("Invalid login credentials")) {
-          // Intentamos hacer un registro "fantasma" muy rápido sólo para leer la respuesta de Supabase.
-          // Si Supabase dice que el usuario ya existe, el problema es sólo la contraseña.
-          // Si no dice que existe, significa que es un correo totalmente nuevo.
           const { error: signUpCheck } = await supabase.auth.signUp({ email, password: 'TemporaryCheck123!' });
-          
           if (signUpCheck && signUpCheck.message.includes("User already registered")) {
             alert("Contraseña incorrecta. Inténtalo de nuevo.");
           } else {
-            // El usuario no existe en la base de datos
             setSuggestRegister(true);
           }
         } else {
@@ -78,29 +70,22 @@ export default function Login({ setSession }) {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-slate-950 p-4 font-sans text-slate-100 selection:bg-blue-500/30">
-      
-      <form 
-        onSubmit={handleSubmit} 
-        className="bg-slate-900/90 backdrop-blur-md p-8 rounded-3xl shadow-2xl w-full max-w-sm border border-slate-800/80 transition-all duration-500 ease-in-out transform hover:scale-[1.005]"
-      >
+    <div className="w-full flex justify-center items-start">
+      <form onSubmit={handleSubmit} className="w-full max-w-xs mx-auto">
         
+        {/* Encabezado */}
         <div className="text-center mb-6">
-          <h2 className="text-2xl font-black text-slate-100 uppercase tracking-tight transition-all duration-300">
+          <h2 className="text-2xl font-black text-slate-100 uppercase tracking-tight">
             {isRegisterMode ? 'Crear Cuenta' : 'Acceso Staff'}
           </h2>
-          <p className="text-slate-400 text-xs mt-1 transition-all duration-300">
+          <p className="text-slate-400 text-xs mt-1">
             {isRegisterMode ? 'Registra tu correo para administrar tu gimnasio' : 'Ingresa tus credenciales para continuar'}
           </p>
         </div>
 
         {/* ALERTA INTELIGENTE: SUGERENCIA DE REGISTRO */}
-        <div className={`transition-all duration-500 ease-in-out overflow-hidden ${
-          suggestRegister 
-            ? 'max-h-24 opacity-100 mb-4 transform translate-y-0' 
-            : 'max-h-0 opacity-0 pointer-events-none'
-        }`}>
-          <div className="p-3 bg-blue-950/40 border border-blue-800/60 rounded-xl text-center">
+        {suggestRegister && (
+          <div className="p-3 bg-blue-950/40 border border-blue-800/60 rounded-xl text-center mb-4">
             <p className="text-[11px] text-blue-300 mb-2">Este correo no está registrado en el sistema.</p>
             <button
               type="button"
@@ -110,13 +95,14 @@ export default function Login({ setSession }) {
               }}
               className="text-xs bg-blue-600 hover:bg-blue-500 text-white font-bold py-1 px-3 rounded-lg transition"
             >
-              Registrar este correo ahora
+              ✨ Registrar este correo ahora
             </button>
           </div>
-        </div>
+        )}
 
         {/* Campos del Formulario */}
-        <div className="mb-2">
+        <div className="flex flex-col gap-4">
+          {/* Input Email */}
           <input 
             className="w-full p-3 bg-slate-950/80 border border-slate-800 rounded-xl outline-none text-slate-100 text-sm placeholder-slate-600 transition-all duration-300 focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10" 
             type="email" 
@@ -126,8 +112,9 @@ export default function Login({ setSession }) {
             onChange={(e) => setEmail(e.target.value)} 
           />
           
+          {/* Input Password */}
           <input 
-            className="w-full p-3 mt-4 bg-slate-950/80 border border-slate-800 rounded-xl outline-none text-slate-100 text-sm placeholder-slate-600 transition-all duration-300 focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10" 
+            className="w-full p-3 bg-slate-950/80 border border-slate-800 rounded-xl outline-none text-slate-100 text-sm placeholder-slate-600 transition-all duration-300 focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10" 
             type="password" 
             placeholder="Contraseña" 
             required
@@ -135,13 +122,9 @@ export default function Login({ setSession }) {
             onChange={(e) => setPassword(e.target.value)} 
           />
 
-          {/* INDICADORES DE FUERZA */}
-          <div className={`transition-all duration-500 ease-in-out overflow-hidden ${
-            isRegisterMode && password.length > 0 
-              ? 'max-h-40 opacity-100 mt-3 mb-1' 
-              : 'max-h-0 opacity-0 pointer-events-none'
-          }`}>
-            <div className="space-y-2 px-1">
+          {/* INDICADORES DE FUERZA (Solo existen en el código si es Modo Registro y hay letras) */}
+          {isRegisterMode && password.length > 0 && (
+            <div className="space-y-2 px-1 mt-1">
               <div className="w-full bg-slate-800 h-1.5 rounded-full overflow-hidden">
                 <div className={`h-full transition-all duration-500 ease-out ${getStrengthColor()}`}></div>
               </div>
@@ -154,14 +137,10 @@ export default function Login({ setSession }) {
                 <li className={`transition-colors duration-300 ${isLengthValid ? "text-emerald-400 font-bold" : ""}`}>{isLengthValid ? '✓' : '•'} Mín. 6 letras</li>
               </ul>
             </div>
-          </div>
+          )}
 
-          {/* RECUADRO DE CONFIRMACIÓN */}
-          <div className={`transition-all duration-500 ease-in-out overflow-hidden ${
-            isRegisterMode 
-              ? 'max-h-14 opacity-100 mt-4' 
-              : 'max-h-0 opacity-0 pointer-events-none'
-          }`}>
+          {/* RECUADRO DE CONFIRMACIÓN (Solo existe en el código si es Modo Registro) */}
+          {isRegisterMode && (
             <input 
               className={`w-full p-3 bg-slate-950/80 border rounded-xl outline-none text-slate-100 text-sm placeholder-slate-600 transition-all duration-300 focus:ring-4 ${
                 confirmPassword.length > 0 && password !== confirmPassword 
@@ -174,17 +153,19 @@ export default function Login({ setSession }) {
               value={confirmPassword}
               onChange={(e) => setConfirmPassword(e.target.value)} 
             />
-          </div>
+          )}
         </div>
 
+        {/* Botón interactivo (Separado limpiamente por mt-5 fijo) */}
         <button 
           disabled={loading || (isRegisterMode && (strengthPoints < 4 || password !== confirmPassword))} 
           type="submit"
-          className="w-full py-3 mt-4 bg-blue-600 text-white font-bold rounded-xl shadow-lg transition-all duration-300 hover:bg-blue-500 active:scale-[0.98] disabled:opacity-30 disabled:hover:bg-blue-600 disabled:active:scale-100"
+          className="w-full py-3 mt-5 bg-blue-600 text-white font-bold rounded-xl shadow-lg transition-all duration-300 hover:bg-blue-500 active:scale-[0.98] disabled:opacity-30 disabled:hover:bg-blue-600 disabled:active:scale-100 text-sm"
         >
           {loading ? 'Procesando...' : (isRegisterMode ? 'Registrarme y Entrar' : 'Iniciar Sesión')}
         </button>
 
+        {/* Enlace para alternar modos */}
         <div className="mt-6 text-center">
           <button
             type="button"
