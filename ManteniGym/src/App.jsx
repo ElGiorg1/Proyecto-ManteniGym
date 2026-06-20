@@ -12,20 +12,101 @@ const MAP_HEIGHT = 800;
 const MACHINE_W = 120;
 const MACHINE_H = 80;
 
-export default function Main() {
+// ==========================================
+// 1. EL COMPONENTE PRINCIPAL (EL DIRECTOR)
+// ==========================================
+export default function App() {
   const [session, setSession] = useState(null);
+  const [gym, setGym] = useState(null);
+  const [loadingGym, setLoadingGym] = useState(true);
 
   useEffect(() => {
+    // Verificar sesión inicial
     supabase.auth.getSession().then(({ data: { session } }) => {
       setSession(session);
+      if (session) checkGymOwnership(session.user.id);
+      else setLoadingGym(false);
     });
+
+    // Escuchar cambios de sesión
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      setSession(session);
+      if (session) checkGymOwnership(session.user.id);
+      else {
+        setGym(null);
+        setLoadingGym(false);
+      }
+    });
+
+    return () => subscription.unsubscribe();
   }, []);
 
+  async function checkGymOwnership(userId) {
+    try {
+      const { data, error } = await supabase
+        .from('gimnasios')
+        .select('*')
+        .eq('admin_id', userId);
+      
+      if (error) {
+        console.error("Error de Supabase:", error);
+        setGym(null);
+      } else if (data && data.length > 0) {
+        setGym(data[0]); // Tomamos el primer gimnasio encontrado
+      } else {
+        setGym(null);
+      }
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setLoadingGym(false);
+    }
+  }
+
+  if (loadingGym) return <div className="flex h-screen items-center justify-center font-bold text-xl">Cargando sistema...</div>;
   if (!session) return <Login setSession={setSession} />;
-  return <GymApp session={session} />;
+  if (!gym) return <GymSetup setGym={setGym} userId={session.user.id} />;
+
+  // Si tiene sesión y tiene un gimnasio, cargamos el mapa real pasando el objeto 'gym'
+  return <GymMapActual gym={gym} />;
 }
 
-export function GymApp() {
+// ==========================================
+// 2. PANTALLA INTERMEDIA: CREACIÓN DE GYM
+// ==========================================
+function GymSetup({ setGym, userId }) {
+  const createGym = async () => {
+    const nombre = prompt("¿Cómo se llamará tu gimnasio?");
+    if (!nombre) return;
+    
+    const { data, error } = await supabase
+      .from('gimnasios')
+      .insert([{ nombre, admin_id: userId }])
+      .select()
+      .single();
+
+    if (error) alert("Error al crear: " + error.message);
+    else setGym(data);
+  };
+
+  return (
+    <div className="flex flex-col items-center justify-center h-screen bg-gray-50 p-6 text-center">
+      <h1 className="text-4xl font-black mb-4 text-gray-800">Bienvenido a ManteniGym</h1>
+      <p className="text-gray-600 mb-8 max-w-sm">Para comenzar a ordenar tus equipos, necesitas registrar tu gimnasio en el sistema.</p>
+      <button 
+        onClick={createGym} 
+        className="px-8 py-4 bg-blue-600 text-white font-bold rounded-2xl shadow-lg hover:bg-blue-700 transition-all"
+      >
+        + Crear mi primer Gimnasio
+      </button>
+    </div>
+  );
+}
+
+// ==========================================
+// 3. EL MAPA INTERACTIVO REAL
+// ==========================================
+function GymMapActual({ gym }) {
   const [machines, setMachines] = useState([]);
   const [selectedMachine, setSelectedMachine] = useState(null);
   const [note, setNote] = useState("");
@@ -41,11 +122,17 @@ export function GymApp() {
 
   useEffect(() => {
     fetchMachines();
-  }, []);
+  }, [gym]);
 
   async function fetchMachines() {
+    if (!gym || !gym.id) return;
+
     setLoading(true);
-    const { data, error } = await supabase.from('maquinas').select('*');
+    const { data, error } = await supabase
+      .from('maquinas')
+      .select('*')
+      .eq('gym_id', gym.id); 
+      
     if (error) console.error('Error cargando:', error);
     else setMachines(data);
     setLoading(false);
@@ -55,23 +142,19 @@ export function GymApp() {
     e.preventDefault();
     if (!newMachineName || !newMachineAssignedTo) return;
 
-    // Intentamos insertar la máquina
     const { error } = await supabase.from('maquinas').insert([
       { 
         nombre: newMachineName, 
         estado: 'al_dia', 
         x: 360, y: 280, 
-        encargado: parseInt(newMachineAssignedTo) 
+        assigned_to: parseInt(newMachineAssignedTo),
+        gym_id: gym.id 
       }
     ]);
 
-    // LÓGICA DE MANEJO DE ERRORES RESTAURADA
     if (error) {
-      // Si falla, te mostrará una alerta con el motivo exacto
       alert("Error al guardar en la base de datos: " + error.message);
-      console.error("Detalle del error:", error);
     } else {
-      // Si tiene éxito, cierra la ventana y limpia el formulario
       setShowAddModal(false);
       setNewMachineName("");
       setNewMachineAssignedTo("");
@@ -95,7 +178,6 @@ export function GymApp() {
     }
   };
 
-  // --- NUEVA LÓGICA DE ARRASTRE CON CUADRÍCULA ---
   const handleMouseDown = (e, id) => {
     if (!isEditMode) return;
     setDraggedMachineId(id);
@@ -109,15 +191,12 @@ export function GymApp() {
     pt.y = e.clientY;
     const cursorPt = pt.matrixTransform(svg.getScreenCTM().inverse());
 
-    // 1. Calcular nueva posición centrada en el cursor
     let rawX = cursorPt.x - (MACHINE_W / 2);
     let rawY = cursorPt.y - (MACHINE_H / 2);
 
-    // 2. EFECTO IMÁN: Redondear al múltiplo más cercano de la cuadrícula (20px)
     let snappedX = Math.round(rawX / GRID_SIZE) * GRID_SIZE;
     let snappedY = Math.round(rawY / GRID_SIZE) * GRID_SIZE;
 
-    // 3. LÍMITES: Evitar que se salgan del mapa
     snappedX = Math.max(0, Math.min(snappedX, MAP_WIDTH - MACHINE_W));
     snappedY = Math.max(0, Math.min(snappedY, MAP_HEIGHT - MACHINE_H));
 
@@ -131,7 +210,7 @@ export function GymApp() {
     const movedMachine = machines.find(m => m.id === draggedMachineId);
     setDraggedMachineId(null); 
 
-    const { error } = await supabase
+    await supabase
       .from('maquinas')
       .update({ x: movedMachine.x, y: movedMachine.y })
       .eq('id', movedMachine.id);
@@ -145,7 +224,7 @@ export function GymApp() {
     return 'fill-green-400 stroke-green-600';
   };
 
-  if (loading) return <div className="flex h-screen items-center justify-center font-bold text-xl">Cargando...</div>;
+  if (loading) return <div className="flex h-screen items-center justify-center font-bold text-xl">Cargando mapa...</div>;
 
   return (
     <div className="relative min-h-screen bg-gray-100 p-4 md:p-10 font-sans text-gray-900">
@@ -154,7 +233,7 @@ export function GymApp() {
       {showAddModal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4">
           <div className="bg-white rounded-2xl shadow-2xl p-6 w-full max-w-md">
-            <h2 className="text-2xl font-bold mb-4">Nueva Máquina</h2>
+            <h2 className="text-2xl font-bold mb-4">Nueva Máquina ({gym.nombre})</h2>
             <form onSubmit={handleAddMachine} className="space-y-4">
               <div>
                 <label className="block text-sm font-bold text-gray-700 mb-1">Nombre del aparato:</label>
@@ -173,14 +252,26 @@ export function GymApp() {
         </div>
       )}
 
-      {/* 1. Hicimos el contenedor principal mucho más ancho (max-w-[95%]) */}
       <div className="max-w-[95%] mx-auto grid grid-cols-1 lg:grid-cols-4 gap-6">
         
-        {/* 2. El mapa ahora ocupa 3 de las 4 columnas para ser más protagonista */}
+        {/* MAPA */}
         <div className="lg:col-span-3 bg-white rounded-3xl shadow-xl p-6 border border-gray-200">
           <div className="mb-6 flex justify-between items-center">
             <div>
-              <h1 className="text-2xl font-black text-gray-800 uppercase tracking-tight">Mapa de Control</h1>
+              <div className="flex items-center gap-3">
+                <h1 className="text-2xl font-black text-gray-800 uppercase tracking-tight">Mapa de {gym.nombre}</h1>
+                
+                {/* NUEVO BOTÓN DE CERRAR SESIÓN */}
+                <button 
+                  onClick={async () => {
+                    const { error } = await supabase.auth.signOut();
+                    if (error) alert(error.message);
+                  }}
+                  className="px-2 py-1 text-xs bg-red-50 text-red-600 rounded-lg font-bold hover:bg-red-100 transition"
+                >
+                  🚪 Salir
+                </button>
+              </div>
               <p className="text-gray-500 text-sm">
                 {isEditMode ? "Modo de edición activado. Arrastra las máquinas." : "Toca una máquina para reportar."}
               </p>
@@ -198,10 +289,8 @@ export function GymApp() {
             )}
           </div>
 
-          {/* 3. Aumentamos la altura de la caja a '70vh' (70% de la pantalla) */}
           <div className={`relative bg-white rounded-xl border-2 h-[70vh] min-h-[600px] overflow-hidden ${isEditMode ? 'border-blue-400 border-dashed' : 'border-gray-300 border-solid'}`}>
             <svg ref={svgRef} className="w-full h-full cursor-crosshair" viewBox={`0 0 ${MAP_WIDTH} ${MAP_HEIGHT}`} preserveAspectRatio="xMidYMid meet" onMouseMove={handleMouseMove} onMouseUp={handleMouseUp} onMouseLeave={handleMouseUp}>
-              
               <defs>
                 <pattern id="grid" width={GRID_SIZE} height={GRID_SIZE} patternUnits="userSpaceOnUse">
                   <path d={`M ${GRID_SIZE} 0 L 0 0 0 ${GRID_SIZE}`} fill="none" stroke="#e2e8f0" strokeWidth="1"/>
@@ -209,7 +298,6 @@ export function GymApp() {
               </defs>
               <rect width="100%" height="100%" fill="url(#grid)" />
 
-              {/* MÁQUINAS */}
               {machines.map((m) => (
                 <g 
                   key={m.id} 
@@ -222,7 +310,7 @@ export function GymApp() {
                   className={`transition-all duration-100 ${isEditMode ? 'cursor-grab active:cursor-grabbing' : 'cursor-pointer hover:opacity-80'}`}
                 >
                   <rect x={m.x} y={m.y} width={MACHINE_W} height={MACHINE_H} rx="8" className={`${getStatusColor(m)} stroke-2 shadow-sm`} />
-                  <text x={m.x + (MACHINE_W/2)} y={m.y + 35} textAnchor="middle" className="text-[10px] font-bold fill-gray-800 pointer-events-none">
+                  <text x={m.x + (MACHINE_W/2)} y={m.y + 45} textAnchor="middle" className="text-xs font-bold fill-gray-800 pointer-events-none">
                     {m.nombre}
                   </text>
                 </g>
@@ -231,7 +319,7 @@ export function GymApp() {
           </div>
         </div>
 
-        {/* LADO DERECHO: PANEL DE ACCIÓN */}
+        {/* PANEL DE ACCIÓN */}
         <div className="bg-white rounded-3xl shadow-xl p-6 border border-gray-200 flex flex-col justify-between">
           {selectedMachine && !isEditMode ? (
             <div className="space-y-6">
